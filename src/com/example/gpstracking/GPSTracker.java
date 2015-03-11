@@ -34,7 +34,7 @@ public class GPSTracker extends Service implements LocationListener {
 	private static final long MIN_DISTANCE_CHANGE_FOR_UPDATES = 10; // 10 meters
 
 	// The minimum time between updates in milliseconds
-	private static final long MIN_TIME_BW_UPDATES = 1000 * 60 * 1;//1000 * 60 * 1; // 1 minute
+	private static final long MIN_TIME_BW_UPDATES = 1000 * 60 * 1; // 1 minute
 
 	// Declaring a Location Manager
 	protected LocationManager locationManager;
@@ -58,8 +58,6 @@ public class GPSTracker extends Service implements LocationListener {
 					.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
 
 			if (!isGPSEnabled && !isNetworkEnabled) {
-				Log.d("GPS Enabled", "Network not available");
-				this.canGetLocation = false;
 				// no network provider is enabled
 			} else {
 				this.canGetLocation = true;
@@ -85,27 +83,14 @@ public class GPSTracker extends Service implements LocationListener {
 								LocationManager.GPS_PROVIDER,
 								MIN_TIME_BW_UPDATES,
 								MIN_DISTANCE_CHANGE_FOR_UPDATES, this);
-						Log.d("GPS Enabled", "GPS Enabled pt=" + locationManager);
+						Log.d("GPS Enabled", "GPS Enabled");
 						if (locationManager != null) {
-							Log.d("GPS Enabled", "Getting location");
 							location = locationManager
 									.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-							
-							Log.d("GPS Enabled", "Got location " + location);
-							
 							if (location != null) {
 								latitude = location.getLatitude();
 								longitude = location.getLongitude();
-								Log.d("GPS Enabled", "Location OK");
 							}
-							else
-							{
-								Log.d("GPS Enabled", "Location pointer null");
-							}
-						}
-						else
-						{
-							Log.d("GPS Enabled", "Location is empty");
 						}
 					}
 				}

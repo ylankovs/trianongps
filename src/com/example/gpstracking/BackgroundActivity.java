@@ -33,11 +33,11 @@ public class BackgroundActivity extends Service {
 	
 	/** Called when the activity is first created. */
 	public void onCreate() {
-		Toast.makeText(getApplicationContext(), "Service created ", Toast.LENGTH_LONG).show();
+		Toast.makeText(getApplicationContext(), "Created service", Toast.LENGTH_LONG).show();
 	}
 
 	public void onStart(Intent intent, int startid) {
-		Toast.makeText(this, "Service Started", Toast.LENGTH_LONG).show();
+		Toast.makeText(this, "My Service Started", Toast.LENGTH_LONG).show();
 
 		androidGPS = new AndroidGPSTrackingActivity();
 	}
