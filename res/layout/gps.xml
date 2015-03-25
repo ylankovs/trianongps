@@ -32,23 +32,31 @@
         android:minHeight="100dp" />
 
     <Button
-        android:id="@+id/button1"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentRight="true"
-        android:layout_below="@+id/spinner1"
-        android:layout_marginRight="36dp"
-        android:layout_marginTop="22dp"
-        android:text="Отправить" />
-
-    <Button
         android:id="@+id/button2"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_alignBaseline="@+id/button1"
-        android:layout_alignBottom="@+id/button1"
+    	android:layout_alignBaseline="@+id/button3"
         android:layout_alignParentLeft="true"
-        android:layout_marginLeft="29dp"
+        android:layout_centerHorizontal="true"
         android:text="Загрузить" />
+
+    <Button
+    	android:id="@+id/button3"
+    	android:layout_width="wrap_content"
+    	android:layout_height="wrap_content"
+    	android:layout_below="@+id/spinner1"
+    	android:layout_marginTop="24dp"
+    	android:layout_centerVertical="true"
+    	android:layout_centerHorizontal="true"
+    	android:text="Свернуть" />
+
+    <Button
+    	android:id="@+id/button1"
+    	android:layout_width="wrap_content"
+    	android:layout_height="wrap_content"
+    	android:layout_alignBaseline="@+id/button3"
+        android:layout_alignParentRight="true"
+    	android:layout_centerHorizontal="true"
+    	android:text="Отправить" />
 
 </RelativeLayout>

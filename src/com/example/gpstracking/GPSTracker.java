@@ -1,5 +1,7 @@
 package com.example.gpstracking;
 
+import java.util.Random;
+
 import android.app.AlertDialog;
 import android.app.Service;
 import android.content.Context;
@@ -12,6 +14,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.util.Log;
+import android.widget.Toast;
 
 public class GPSTracker extends Service implements LocationListener {
 
@@ -34,7 +37,7 @@ public class GPSTracker extends Service implements LocationListener {
 	private static final long MIN_DISTANCE_CHANGE_FOR_UPDATES = 10; // 10 meters
 
 	// The minimum time between updates in milliseconds
-	private static final long MIN_TIME_BW_UPDATES = 1000 * 60 * 1; // 1 minute
+	private static final long MIN_TIME_BW_UPDATES = 1000 * 5 * 1; // 5000 miliseconds
 
 	// Declaring a Location Manager
 	protected LocationManager locationManager;
@@ -59,6 +62,7 @@ public class GPSTracker extends Service implements LocationListener {
 
 			if (!isGPSEnabled && !isNetworkEnabled) {
 				// no network provider is enabled
+				this.canGetLocation = false;
 			} else {
 				this.canGetLocation = true;
 				if (isNetworkEnabled) {
@@ -110,7 +114,9 @@ public class GPSTracker extends Service implements LocationListener {
 	public void stopUsingGPS(){
 		if(locationManager != null){
 			locationManager.removeUpdates(GPSTracker.this);
-		}		
+		}
+		
+		Toast.makeText(getApplicationContext(), "Stopped the GPS Service", Toast.LENGTH_LONG).show();
 	}
 	
 	/**
@@ -121,8 +127,11 @@ public class GPSTracker extends Service implements LocationListener {
 			latitude = location.getLatitude();
 		}
 		
+		//Random randomGenerator = new Random();
+		//int randomInt = randomGenerator.nextInt(100);
+		
 		// return latitude
-		return latitude;
+		return latitude;// + (double)randomInt/1000;
 	}
 	
 	/**
@@ -133,8 +142,11 @@ public class GPSTracker extends Service implements LocationListener {
 			longitude = location.getLongitude();
 		}
 		
+		//Random randomGenerator = new Random();
+		//int randomInt = randomGenerator.nextInt(100);
+		
 		// return longitude
-		return longitude;
+		return longitude;// + (double)randomInt/1000;
 	}
 	
 	/**

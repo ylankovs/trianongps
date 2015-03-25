@@ -35,6 +35,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.NetworkInfo.State;
 import android.os.Bundle;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -61,24 +62,48 @@ import android.view.ViewGroup.LayoutParams;
 
 	Button buttonLoad;
 	Button buttonSend;
+	Button buttonMinimize;
+
+	TextView text;
 
 	// GPSTracker class
 	GPSTracker gps;
 
 	private Spinner spinner1, spinner2;
+	private ArrayAdapter<String> spinnerAdapter1;
+	private ArrayAdapter<String> spinnerAdapter2;
 
 	private String mess = "";
 	private Timer myTimer;
 	private double saveLong = 0;
 	private double saveLat = 0;
 
-	private static int TIMESTAMP_GPS = 30000;
+	private static int TIMESTAMP_GPS = 60000; //60000 mili seconds
 	private static int NUM_COORD_PARAMS = 3;
 	private static int NUM_ALLOWED_SETS_PER_TX = 65;
+	private static int NUM_ADDRS_PARAMS = 4;
+	private static int NUM_MSG_PARAMS = 3;
 
 	private static String filenameGPS = "gpscoords";
 	private static String filenameMSG = "messages";
 	private static String filenameADRS = "addresses";
+
+	private HttpURLConnection urlConnection = null;
+	private URL url = null;
+	private ConnectivityManager connManager = null;
+
+	private State mobile = null;
+	private State wifi = null;
+
+	private boolean clientWithinRange(double lattClnt, double latt, double lngtClnt, double lngt)
+	{
+		boolean ret = false;
+		if ((lattClnt <= (latt + 0.002) || lattClnt >= (latt - 0.002)) && (lngtClnt <= (lngt + 0.002) || lngtClnt >= (lngt - 0.002)))
+		{
+			ret = true;
+		}
+		return ret;
+	}
 
 	/** Called when the activity is first created. */
 	@Override
@@ -93,6 +118,11 @@ import android.view.ViewGroup.LayoutParams;
 		buttonSend = (Button) findViewById(R.id.button2);
 		buttonSend.setOnClickListener(this);
 
+		buttonMinimize = (Button) findViewById(R.id.button3);
+		buttonMinimize.setOnClickListener(this);
+
+		text = (TextView) findViewById(R.id.editText1);
+
 		Intent intent = getIntent();
 		Bundle extras = intent.getExtras();
 		mess = extras.getString("emp");
@@ -106,17 +136,17 @@ import android.view.ViewGroup.LayoutParams;
 
 		}, 0, TIMESTAMP_GPS);
 
-		moveTaskToBack(true);
+		Toast.makeText(getApplicationContext(), "Move task to back: " + moveTaskToBack(true), Toast.LENGTH_LONG).show();
 
 		spinner1 = (Spinner)findViewById(R.id.spinner1);
-		ArrayAdapter<String> spinnerAdapter1 = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, android.R.id.text1);
+		spinnerAdapter1 = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, android.R.id.text1);
 		spinnerAdapter1.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
 		spinner1.setAdapter(spinnerAdapter1);
 		spinnerAdapter1.add("клиент");
 		spinnerAdapter1.notifyDataSetChanged();
-		
+
 		spinner2 = (Spinner)findViewById(R.id.spinner2);
-		ArrayAdapter<String> spinnerAdapter2 = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, android.R.id.text1);
+		spinnerAdapter2 = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, android.R.id.text1);
 		spinnerAdapter2.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
 		spinner2.setAdapter(spinnerAdapter2);
 		spinnerAdapter2.add("платеж");
@@ -154,8 +184,8 @@ import android.view.ViewGroup.LayoutParams;
 
 	private Runnable Timer_Tick = new Runnable() {
 		public void run() {
-
 			//This method runs in the same thread as the UI.    	       
+			String err = null;
 
 			//Do something to the UI thread here
 			gps = new GPSTracker(AndroidGPSTrackingActivity.this);
@@ -171,19 +201,20 @@ import android.view.ViewGroup.LayoutParams;
 
 				Toast.makeText(getApplicationContext(), "Getting GPS coordinates \nprev=" + saveLong + " " + saveLat + "\nnew=" + longitude + " " + latitude + " " + Math.abs((saveLong - longitude) + Math.abs(saveLat - latitude)), Toast.LENGTH_LONG).show();
 
-				ConnectivityManager connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+				connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
 
-				State mobile = connManager.getNetworkInfo(0).getState();
-				State wifi = connManager.getNetworkInfo(1).getState();
+				mobile = connManager.getNetworkInfo(0).getState();
+				wifi = connManager.getNetworkInfo(1).getState();
 
 				Toast.makeText(getApplicationContext(), "Distance: " + dist + "\nSpeed: " + sp, Toast.LENGTH_LONG).show();
 				String params = latitude + "^" + longitude + "^" + time;
 
+				StringBuilder sb = null;
 				if (mobile == NetworkInfo.State.CONNECTED || wifi == NetworkInfo.State.CONNECTED)
 				{
 					if (dist >= 0.0002)
 					{
-						StringBuilder sb = new StringBuilder("");
+						sb = new StringBuilder("");
 						try{
 							int numLines = 0;
 							InputStream is = openFileInput(filenameGPS);
@@ -224,15 +255,15 @@ import android.view.ViewGroup.LayoutParams;
 						// \n is for new line
 						//Toast.makeText(getApplicationContext(), "Your Location is - \nLat: " + latitude + "\nLong: " + longitude, Toast.LENGTH_LONG).show();
 
-						HttpURLConnection urlConnection = null;
-						URL url = null;
-						String err = null;
+						urlConnection = null;
+						url = null;
+						err = null;
 						try {
 							String delims = "[\\^]";
 							String[] split = (sb.toString()).split(delims);
 							int nSets = split.length / NUM_COORD_PARAMS; 
 							int nTx = (int)Math.ceil((double)nSets / NUM_ALLOWED_SETS_PER_TX);
-							
+
 							Toast.makeText(getApplicationContext(), "split= " + split + " len= " + split.length + " nSets= " + nSets 
 									+ " nTx= " + nTx, Toast.LENGTH_LONG).show();
 
@@ -246,7 +277,7 @@ import android.view.ViewGroup.LayoutParams;
 									sendingParams += split[j] + "^" + split[j+1] + "^" + split[j+2] + "^";
 									nCnt ++;
 								}
-								
+
 								Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track.php?"
 										+ sendingParams, Toast.LENGTH_LONG).show();
 
@@ -284,7 +315,7 @@ import android.view.ViewGroup.LayoutParams;
 					}
 					else
 					{
-						StringBuilder sb = new StringBuilder("");
+						sb = new StringBuilder("");
 						try{
 							InputStream is = openFileInput(filenameGPS);
 							if ( is != null ) {
@@ -318,9 +349,9 @@ import android.view.ViewGroup.LayoutParams;
 							// \n is for new line
 							//Toast.makeText(getApplicationContext(), "Your Location is - \nLat: " + latitude + "\nLong: " + longitude, Toast.LENGTH_LONG).show();
 
-							HttpURLConnection urlConnection = null;
-							URL url = null;
-							String err = null;
+							urlConnection = null;
+							url = null;
+							err = null;
 							try {
 								String delims = "[\\^]";
 								String[] split = (sb.toString()).split(delims);
@@ -363,6 +394,80 @@ import android.view.ViewGroup.LayoutParams;
 							}
 						}
 					}
+
+					// check if messages are in msg data file, send all the messages found
+					try{
+						int numLines = 0;
+						InputStream is = openFileInput(filenameMSG);
+						if ( is != null ) {
+							InputStreamReader inputStreamReader = new InputStreamReader(is);
+							BufferedReader reader = new BufferedReader(inputStreamReader);
+							String line = null;
+							while ((line = reader.readLine()) != null) {
+								sb.append(line);
+								numLines ++;
+							}
+						}
+						is.close();
+						Toast.makeText(getApplicationContext(), "Read from file filenameMSG: " + sb + " lines= " + numLines, Toast.LENGTH_LONG).show();
+
+						File dir = getFilesDir();
+						File file = new File(dir, filenameMSG);
+						boolean deleted = file.delete();
+						Toast.makeText(getApplicationContext(), "File delete filenameMSG: " + (deleted ? "yes" : "no"), Toast.LENGTH_LONG).show();
+					} catch(OutOfMemoryError om){
+						om.printStackTrace();
+						Toast.makeText(getApplicationContext(), "Out of memory to read file filenameMSG", Toast.LENGTH_LONG).show();
+					} catch(Exception ex){
+						ex.printStackTrace();
+						Toast.makeText(getApplicationContext(), "Error in the program filenameMSG " + ex.getMessage(), Toast.LENGTH_LONG).show();
+					}
+
+					if(sb != null && !sb.toString().equals(""))
+					{
+						sb.deleteCharAt(0);
+
+						String delims = "[\\^]";
+						String[] split = (sb.toString()).split(delims);
+						int nTx = split.length/NUM_MSG_PARAMS;
+						Toast.makeText(getApplicationContext(), "Full list: " + sb, Toast.LENGTH_LONG).show();
+
+						for (int i=0; i<(nTx*NUM_MSG_PARAMS); i+=NUM_MSG_PARAMS)
+						{
+							String sData = split[i] + "^" + split[i+1] + "^" + split[i+2];
+							
+							urlConnection = null;
+							url = null;
+							connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+
+							mobile = connManager.getNetworkInfo(0).getState();
+							wifi = connManager.getNetworkInfo(1).getState();
+
+							try {
+								url = new URL("http://91.217.202.15:8080/tracking/track_msg_sav.php?idAg=" + mess + "sData=" + sData);
+								urlConnection = (HttpURLConnection) url.openConnection();
+								Toast.makeText(getApplicationContext(), "Server message track_msg_sav.php: " 
+										+ urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
+								InputStream in = new BufferedInputStream(urlConnection.getInputStream());
+								urlConnection.disconnect();
+								//readStream(in);
+							} catch (MalformedURLException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+								err = e.getMessage();
+								Toast.makeText(getApplicationContext(), "err: " + err, Toast.LENGTH_LONG).show();
+							} catch (IOException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+								err = e.getMessage();
+								Toast.makeText(getApplicationContext(), "err: " + err, Toast.LENGTH_LONG).show();
+							}
+							finally {
+								if (urlConnection != null)
+									urlConnection.disconnect();
+							}
+						}
+					}
 				}
 				else
 				{
@@ -385,6 +490,51 @@ import android.view.ViewGroup.LayoutParams;
 						saveLong = longitude;
 					}
 				}
+
+				// load list of clients from file
+				try{
+					sb = new StringBuilder("");
+					InputStream is = openFileInput(filenameADRS);
+					if ( is != null ) {
+						InputStreamReader inputStreamReader = new InputStreamReader(is);
+						BufferedReader reader = new BufferedReader(inputStreamReader);
+						String line = null;
+						while ((line = reader.readLine()) != null) {
+							sb.append(line);
+						}
+					}
+					is.close();
+					Toast.makeText(getApplicationContext(), "Read from file filenameADRS: " + sb, Toast.LENGTH_LONG).show();
+				} catch(OutOfMemoryError om){
+					om.printStackTrace();
+					Toast.makeText(getApplicationContext(), "Out of memory to read file filenameADRS", Toast.LENGTH_LONG).show();
+				} catch(Exception ex){
+					ex.printStackTrace();
+					Toast.makeText(getApplicationContext(), "Error in the program filenameADRS " + ex.getMessage(), Toast.LENGTH_LONG).show();
+				}
+
+				if(sb != null && !sb.toString().equals(""))
+				{
+					String delims = "[\\^]";
+					String[] split = (sb.toString()).split(delims);
+					int nCnt = split.length/NUM_ADDRS_PARAMS;
+
+					spinner1.setAdapter(spinnerAdapter1);
+
+					int offsetAdr = 1;
+					int offsetLatt = 2;
+					int offsetLngt = 3;
+
+					for (int i=0; i<(nCnt*NUM_ADDRS_PARAMS); i+=NUM_ADDRS_PARAMS)
+					{
+						if (clientWithinRange(
+								Double.parseDouble(split[i + offsetLatt]), saveLat, Double.parseDouble(split[i + offsetLngt]), saveLong))
+						{
+							spinnerAdapter1.add(split[i + offsetAdr]);
+						}
+					}
+					spinnerAdapter1.notifyDataSetChanged();
+				}
 			}
 			else
 			{
@@ -399,13 +549,18 @@ import android.view.ViewGroup.LayoutParams;
 	@Override
 	public void onClick(View src) {
 		String err = null;
+		String sendingParams = null;
+		StringBuilder sb = null;
 
 		switch (src.getId()) {
-		case R.id.button1: // buttonLoad
+		case R.id.button3: // buttonMinimize
+			Toast.makeText(getApplicationContext(), "Moving task to background :" + moveTaskToBack(true), Toast.LENGTH_LONG).show();
+			break;
+		case R.id.button2: // buttonLoad
 			try {
 				DefaultHttpClient httpclient = new DefaultHttpClient();
 
-				HttpGet httppost = new HttpGet("http://www.urlOfThePageYouWantToRead.nl/text.txt");
+				HttpGet httppost = new HttpGet("http://91.217.202.15:8080/tracking/track_fetch_addrs.php?idAg=" + mess);
 				HttpResponse response = httpclient.execute(httppost);
 				HttpEntity ht = response.getEntity();
 
@@ -422,7 +577,24 @@ import android.view.ViewGroup.LayoutParams;
 					total.append(line + "\n");
 				}
 
+				/*
+				byte[] encoded = Base64.encode(total.toString().getBytes("CP1252"), Base64.DEFAULT);
+				String str = new String(encoded, "CP1252");
+				 */
 				Toast.makeText(getApplicationContext(), "Read from server:\n" + total, Toast.LENGTH_LONG).show();
+
+				Toast.makeText(getApplicationContext(), "Trying file writes", Toast.LENGTH_LONG).show();
+				FileOutputStream outputStream;
+
+				try {
+					outputStream = openFileOutput(filenameADRS, Context.MODE_PRIVATE);
+					outputStream.write((total).toString().getBytes());
+					outputStream.close();
+					Toast.makeText(getApplicationContext(), "Wrote to file", Toast.LENGTH_LONG).show();
+				} catch (Exception e) {
+					e.printStackTrace();
+					Toast.makeText(getApplicationContext(), "Error in the program." + e.getMessage(), Toast.LENGTH_LONG).show();
+				}
 			} catch (MalformedURLException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -435,10 +607,55 @@ import android.view.ViewGroup.LayoutParams;
 				Toast.makeText(getApplicationContext(), "err: " + err, Toast.LENGTH_LONG).show();
 			}
 			break;
-		case R.id.button2: // buttonSave
+		case R.id.button1: // buttonSave
+			sendingParams = "";
+			sb = new StringBuilder("");
+
+			String textInput = text.getText().toString();
+			String clientSelect = spinner1.getSelectedItem().toString();
+			String typSelect = spinner2.getSelectedItem().toString();
+
+			sendingParams += clientSelect + "^" + typSelect + "^" + textInput;
+
+			try{
+				int numLines = 0;
+				InputStream is = openFileInput(filenameMSG);
+				if ( is != null ) {
+					InputStreamReader inputStreamReader = new InputStreamReader(is);
+					BufferedReader reader = new BufferedReader(inputStreamReader);
+					String line = null;
+					while ((line = reader.readLine()) != null) {
+						sb.append(line);
+						numLines ++;
+					}
+				}
+				is.close();
+				Toast.makeText(getApplicationContext(), "Read from file filenameMSG: " + sb + " lines= " + numLines, Toast.LENGTH_LONG).show();
+
+				File dir = getFilesDir();
+				File file = new File(dir, filenameMSG);
+				boolean deleted = file.delete();
+				Toast.makeText(getApplicationContext(), "File delete filenameMSG: " + (deleted ? "yes" : "no"), Toast.LENGTH_LONG).show();
+			} catch(OutOfMemoryError om){
+				om.printStackTrace();
+				Toast.makeText(getApplicationContext(), "Out of memory to read file filenameMSG", Toast.LENGTH_LONG).show();
+			} catch(Exception ex){
+				ex.printStackTrace();
+				Toast.makeText(getApplicationContext(), "Error in the program filenameMSG " + ex.getMessage(), Toast.LENGTH_LONG).show();
+			}
+
+			if(sb != null && !sb.toString().equals(""))
+			{
+				sb.deleteCharAt(0);
+				sb.append("^" + sendingParams);
+			}
+			else
+				sb.append(sendingParams);
+
+			Toast.makeText(getApplicationContext(), "Full list: " + sb, Toast.LENGTH_LONG).show();
+
 			HttpURLConnection urlConnection = null;
 			URL url = null;
-			String sendingParams = null;
 			ConnectivityManager connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
 
 			State mobile = connManager.getNetworkInfo(0).getState();
@@ -447,9 +664,10 @@ import android.view.ViewGroup.LayoutParams;
 			if (mobile == NetworkInfo.State.CONNECTED || wifi == NetworkInfo.State.CONNECTED)
 			{
 				try {
-					url = new URL("http://91.217.202.15:8080/tracking/track.php?" + sendingParams);
+					url = new URL("http://91.217.202.15:8080/tracking/track_msg_sav.php?idAg=" + mess + "sData=" + sb.toString());
 					urlConnection = (HttpURLConnection) url.openConnection();
-					Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
+					Toast.makeText(getApplicationContext(), "Server message track_msg_sav.php: " 
+							+ urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
 					InputStream in = new BufferedInputStream(urlConnection.getInputStream());
 					urlConnection.disconnect();
 					//readStream(in);
@@ -471,17 +689,17 @@ import android.view.ViewGroup.LayoutParams;
 			}
 			else
 			{
-				Toast.makeText(getApplicationContext(), "Trying file writes", Toast.LENGTH_LONG).show();
+				Toast.makeText(getApplicationContext(), "Trying file writes filenameMSG", Toast.LENGTH_LONG).show();
 				FileOutputStream outputStream;
 
 				try {
 					outputStream = openFileOutput(filenameMSG, Context.MODE_APPEND);
 					outputStream.write(("^" + sendingParams).getBytes());
 					outputStream.close();
-					Toast.makeText(getApplicationContext(), "Wrote to file", Toast.LENGTH_LONG).show();
+					Toast.makeText(getApplicationContext(), "Wrote to file filenameMSG", Toast.LENGTH_LONG).show();
 				} catch (Exception e) {
 					e.printStackTrace();
-					Toast.makeText(getApplicationContext(), "Error in the program." + e.getMessage(), Toast.LENGTH_LONG).show();
+					Toast.makeText(getApplicationContext(), "Error in the program filenameMSG." + e.getMessage(), Toast.LENGTH_LONG).show();
 				}
 			}
 			break;
