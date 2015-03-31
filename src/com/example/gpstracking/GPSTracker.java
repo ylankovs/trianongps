@@ -1,213 +1,427 @@
 package com.example.gpstracking;
 
-import java.util.Random;
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.text.DateFormat;
+import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+import java.util.TimeZone;
 
-import android.app.AlertDialog;
+import com.example.gpstracking.R;
+import android.annotation.SuppressLint;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
+import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.location.LocationProvider;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.NetworkInfo.State;
+import android.os.Binder;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
-import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
+import com.example.gpstracking.MainActivity;
 
-public class GPSTracker extends Service implements LocationListener {
+@SuppressLint("SimpleDateFormat") public class GPSTracker extends Service {
 
-	private final Context mContext;
+	public static final String DATABASE_NAME = "GPSLOGGERDB";
+	public static final String POINTS_TABLE_NAME = "LOCATION_POINTS";
+	public static final String TRIPS_TABLE_NAME = "TRIPS";
 
-	// flag for GPS status
-	boolean isGPSEnabled = false;
+	private final DecimalFormat sevenSigDigits = new DecimalFormat("0.#######");
+	private final DateFormat timestampFormat = new SimpleDateFormat("yyyyMMddHHmmss");
 
-	// flag for network status
-	boolean isNetworkEnabled = false;
+	private LocationManager lm;
+	private LocationListener locationListener;
+	private SQLiteDatabase db;
 
-	// flag for GPS status
-	boolean canGetLocation = false;
+	private static long minTimeMillis = 2000;
+	private static long minDistanceMeters = 10;
+	private static float minAccuracyMeters = 350;
 
-	Location location; // location
-	double latitude; // latitude
-	double longitude; // longitude
+	private int lastStatus = 0;
+	private static boolean showingDebugToast = true;
 
-	// The minimum distance to change Updates in meters
-	private static final long MIN_DISTANCE_CHANGE_FOR_UPDATES = 10; // 10 meters
+	private static final String tag = "GPSTracker";
+	boolean gps_enabled = false;
+	boolean network_enabled = false;
 
-	// The minimum time between updates in milliseconds
-	private static final long MIN_TIME_BW_UPDATES = 1000 * 5 * 1; // 5000 miliseconds
+	private static double saveLong = 0;
+	private static double saveLat = 0;
 
-	// Declaring a Location Manager
-	protected LocationManager locationManager;
+	private static int NUM_COORD_PARAMS = 3;
+	private static int NUM_ALLOWED_SETS_PER_TX = 65;
 
-	public GPSTracker(Context context) {
-		this.mContext = context;
-		getLocation();
+	private static String filenameGPS = "gpscoords";
+
+	private HttpURLConnection urlConnection = null;
+	private URL url = null;
+	private ConnectivityManager connManager = null;
+
+	private State mobile = null;
+	private State wifi = null;
+
+	/** Called when the activity is first created. */
+	private void startLoggerService() {
+		Context context = getApplicationContext();
+
+		// ---use the LocationManager class to obtain GPS locations---
+		lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+
+		locationListener = new MyLocationListener();
+
+		gps_enabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
+		network_enabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+
+		Toast.makeText(getApplicationContext(), "Enabled gps:" + gps_enabled + " net:" + network_enabled, 
+				Toast.LENGTH_LONG).show();
+
+		if (gps_enabled)
+			lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,
+					minTimeMillis,
+					minDistanceMeters,
+					locationListener);
+		if (network_enabled)
+			lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
+					minTimeMillis,
+					minDistanceMeters,
+					locationListener);
 	}
 
-	public Location getLocation() {
-		try {
-			locationManager = (LocationManager) mContext
-					.getSystemService(LOCATION_SERVICE);
+	private void shutdownLoggerService() {
+		lm.removeUpdates(locationListener);
+	}
 
-			// getting GPS status
-			isGPSEnabled = locationManager
-					.isProviderEnabled(LocationManager.GPS_PROVIDER);
+	private double distance(double lat1, double lon1, double lat2, double lon2)
+	{
+		double R = 6371.0; // radius of the earth in km
+		double dLat = (lat2 - lat1) * Math.PI / 180;
+		double dLon = (lon2 - lon1) * Math.PI / 180;
+		double a = 0.5 - Math.cos(dLat) / 2 + Math.cos(lat1 * Math.PI / 180) 
+				* Math.cos(lat2 * Math.PI / 180) * (1 - Math.cos(dLon)) / 2; 
 
-			// getting network status
-			isNetworkEnabled = locationManager
-					.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+		return 1000 * R * 2 * Math.asin(Math.sqrt(a));
+	}
 
-			if (!isGPSEnabled && !isNetworkEnabled) {
-				// no network provider is enabled
-				this.canGetLocation = false;
-			} else {
-				this.canGetLocation = true;
-				if (isNetworkEnabled) {
-					locationManager.requestLocationUpdates(
-							LocationManager.NETWORK_PROVIDER,
-							MIN_TIME_BW_UPDATES,
-							MIN_DISTANCE_CHANGE_FOR_UPDATES, this);
-					Log.d("Network", "Network");
-					if (locationManager != null) {
-						location = locationManager
-								.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-						if (location != null) {
-							latitude = location.getLatitude();
-							longitude = location.getLongitude();
+	public class MyLocationListener implements LocationListener {
+
+		public void onLocationChanged(Location loc) {
+			String err = null;
+			if (loc != null) {
+				boolean pointIsRecorded = false;
+				try {
+					if (loc.hasAccuracy() && loc.getAccuracy() <= minAccuracyMeters) {
+						pointIsRecorded = true;
+
+						double dist = distance(saveLat, saveLong, loc.getLatitude(), loc.getLongitude());
+						String time = new SimpleDateFormat("yyyyMMddkkmmss").format(new Date());
+
+						connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+
+						mobile = connManager.getNetworkInfo(0).getState();
+						wifi = connManager.getNetworkInfo(1).getState();
+
+						//				Toast.makeText(getApplicationContext(), "Distance: " + dist + "\nSpeed: " + sp, Toast.LENGTH_LONG).show();
+						String params = loc.getLatitude() + "^" + loc.getLongitude() + "^" + time;
+
+						StringBuilder sb = null;
+						if (mobile == NetworkInfo.State.CONNECTED || wifi == NetworkInfo.State.CONNECTED)
+						{
+							if (dist >= 0.0002)
+							{
+								sb = new StringBuilder("");
+								try{
+									InputStream is = openFileInput(filenameGPS);
+									if ( is != null ) {
+										InputStreamReader inputStreamReader = new InputStreamReader(is);
+										BufferedReader reader = new BufferedReader(inputStreamReader);
+										String line = null;
+										while ((line = reader.readLine()) != null) {
+											sb.append(line);
+										}
+									}
+									is.close();
+								} catch(OutOfMemoryError om){
+									om.printStackTrace();
+									Toast.makeText(getApplicationContext(), "Out of memory to read file", Toast.LENGTH_LONG).show();
+								} catch(Exception ex){
+									ex.printStackTrace();
+									Toast.makeText(getApplicationContext(), "Cannot read file " + ex.getMessage(), Toast.LENGTH_LONG).show();
+								}
+
+								if(sb != null && !sb.toString().equals(""))
+								{
+									sb.deleteCharAt(0);
+									sb.append("^" + params);
+								}
+								else
+									sb.append(params);
+
+								urlConnection = null;
+								url = null;
+								err = null;
+								try {
+									String delims = "[\\^]";
+									String[] split = (sb.toString()).split(delims);
+									int nSets = split.length / NUM_COORD_PARAMS; 
+									int nTx = (int)Math.ceil((double)nSets / NUM_ALLOWED_SETS_PER_TX);
+
+									int nCnt = 0;
+									for (int i=0; i<nTx; i++)
+									{
+										String sendingParams = "idAg=" + MainActivity.getEmpId() + "&sData=";
+										for(int j=0; j<((nSets - nCnt) > NUM_ALLOWED_SETS_PER_TX ? NUM_ALLOWED_SETS_PER_TX*NUM_COORD_PARAMS
+												: (nSets - nCnt) * NUM_COORD_PARAMS); j+=NUM_COORD_PARAMS)
+										{
+											sendingParams += split[j] + "^" + split[j+1] + "^" + split[j+2] + "^";
+											nCnt ++;
+										}
+
+										Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track.php?"
+												+ sendingParams, Toast.LENGTH_LONG).show();
+
+										sendingParams.substring(0, (sendingParams.length() - 1)); // cut off the first ^ symbol
+										url = new URL("http://91.217.202.15:8080/tracking/track.php?" + sendingParams);
+										urlConnection = (HttpURLConnection) url.openConnection();
+										Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
+										InputStream in = new BufferedInputStream(urlConnection.getInputStream());
+										//readStream(in);
+										urlConnection.disconnect();
+									}
+								} catch (MalformedURLException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+									err = e.getMessage();
+									//							Toast.makeText(getApplicationContext(), "err: " + err, Toast.LENGTH_LONG).show();
+								} catch (IOException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+									err = e.getMessage();
+									//							Toast.makeText(getApplicationContext(), "err: " + err, Toast.LENGTH_LONG).show();
+								}
+								finally {
+									if (urlConnection != null)
+										urlConnection.disconnect();
+									
+									File dir = getFilesDir();
+									File file = new File(dir, filenameGPS);
+									boolean deleted = file.delete();
+									//							Toast.makeText(getApplicationContext(), "File delete: " + (deleted ? "yes" : "no"), Toast.LENGTH_LONG).show();
+								}
+
+								saveLat = loc.getLatitude();
+								saveLong = loc.getLongitude();
+							}
 						}
-					}
-				}
-				// if GPS Enabled get lat/long using GPS Services
-				if (isGPSEnabled) {
-					if (location == null) {
-						locationManager.requestLocationUpdates(
-								LocationManager.GPS_PROVIDER,
-								MIN_TIME_BW_UPDATES,
-								MIN_DISTANCE_CHANGE_FOR_UPDATES, this);
-						Log.d("GPS Enabled", "GPS Enabled");
-						if (locationManager != null) {
-							location = locationManager
-									.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-							if (location != null) {
-								latitude = location.getLatitude();
-								longitude = location.getLongitude();
+						else
+						{
+							if (dist >= 0.0002)
+							{
+								FileOutputStream outputStream;
+
+								try {
+									outputStream = openFileOutput(filenameGPS, Context.MODE_APPEND);
+									outputStream.write(("^" + params).getBytes());
+									outputStream.close();
+									Toast.makeText(getApplicationContext(), "Wrote to file filenameGPS", Toast.LENGTH_LONG).show();
+								} catch (Exception e) {
+									e.printStackTrace();
+									Toast.makeText(getApplicationContext(), "Error to write to file " + e.getMessage(), Toast.LENGTH_LONG).show();
+								}
+
+								saveLat = loc.getLatitude();
+								saveLong = loc.getLongitude();
 							}
 						}
 					}
+				} catch (Exception e) {
+					Log.e(tag, e.toString());
+				}
+				if (pointIsRecorded) {
+					if (showingDebugToast) Toast.makeText(
+							getBaseContext(),
+							"Location stored: \nLat: " + sevenSigDigits.format(loc.getLatitude())
+							+ " \nLon: " + sevenSigDigits.format(loc.getLongitude())
+							+ " \nAlt: " + (loc.hasAltitude() ? loc.getAltitude()+"m":"?")
+							+ " \nAcc: " + (loc.hasAccuracy() ? loc.getAccuracy()+"m":"?"),
+							Toast.LENGTH_SHORT).show();
+				} else {
+					if (showingDebugToast) Toast.makeText(
+							getBaseContext(),
+							"Location not accurate enough: \nLat: " + sevenSigDigits.format(loc.getLatitude())
+							+ " \nLon: " + sevenSigDigits.format(loc.getLongitude())
+							+ " \nAlt: " + (loc.hasAltitude() ? loc.getAltitude()+"m":"?")
+							+ " \nAcc: " + (loc.hasAccuracy() ? loc.getAccuracy()+"m":"?"),
+							Toast.LENGTH_SHORT).show();
 				}
 			}
-
-		} catch (Exception e) {
-			e.printStackTrace();
 		}
 
-		return location;
-	}
-	
-	/**
-	 * Stop using GPS listener
-	 * Calling this function will stop using GPS in your app
-	 * */
-	public void stopUsingGPS(){
-		if(locationManager != null){
-			locationManager.removeUpdates(GPSTracker.this);
+		public void onProviderDisabled(String provider) {
+			if (showingDebugToast) Toast.makeText(getBaseContext(), "onProviderDisabled: " + provider,
+					Toast.LENGTH_SHORT).show();
+
 		}
-		
-		Toast.makeText(getApplicationContext(), "Stopped the GPS Service", Toast.LENGTH_LONG).show();
-	}
-	
-	/**
-	 * Function to get latitude
-	 * */
-	public double getLatitude(){
-		if(location != null){
-			latitude = location.getLatitude();
+
+		public void onProviderEnabled(String provider) {
+			if (showingDebugToast) Toast.makeText(getBaseContext(), "onProviderEnabled: " + provider,
+					Toast.LENGTH_SHORT).show();
+
 		}
-		
-		//Random randomGenerator = new Random();
-		//int randomInt = randomGenerator.nextInt(100);
-		
-		// return latitude
-		return latitude;// + (double)randomInt/1000;
-	}
-	
-	/**
-	 * Function to get longitude
-	 * */
-	public double getLongitude(){
-		if(location != null){
-			longitude = location.getLongitude();
+
+		public void onStatusChanged(String provider, int status, Bundle extras) {
+			String showStatus = null;
+			if (status == LocationProvider.AVAILABLE)
+				showStatus = "Available";
+			if (status == LocationProvider.TEMPORARILY_UNAVAILABLE)
+				showStatus = "Temporarily Unavailable";
+			if (status == LocationProvider.OUT_OF_SERVICE)
+				showStatus = "Out of Service";
+			if (status != lastStatus && showingDebugToast) {
+				Toast.makeText(getBaseContext(),
+						"new status: " + showStatus,
+						Toast.LENGTH_SHORT).show();
+			}
+			lastStatus = status;
 		}
+
+	}
+
+	// Below is the service framework methods
+
+	private NotificationManager mNM;
+
+	@Override
+	public void onCreate() {
+		super.onCreate();
+		mNM = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+
+		startLoggerService();
+
+		// Display a notification about us starting. We put an icon in the
+		// status bar.
+		showNotification();
+	}
+
+	@Override
+	public void onDestroy() {
+		super.onDestroy();
+
+		shutdownLoggerService();
+
+                // Cancel the persistent notification.
+                mNM.cancel(R.string.local_service_started);
+
+                // Tell the user we stopped.
+                Toast.makeText(this, R.string.local_service_stopped,
+                                                Toast.LENGTH_SHORT).show();
+	}
+
+	/**
+	 * Show a notification while this service is running.
+	 */
+	@SuppressWarnings("deprecation")
+	private void showNotification() {
 		
-		//Random randomGenerator = new Random();
-		//int randomInt = randomGenerator.nextInt(100);
-		
-		// return longitude
-		return longitude;// + (double)randomInt/1000;
+		// In this sample, we'll use the same text for the ticker and the
+		// expanded notification
+		CharSequence text = getText(R.string.local_service_started);
+
+		// Set the icon, scrolling text and timestamp
+		Notification notification = new Notification(R.drawable.tracking,
+				text, System.currentTimeMillis());
+
+		// The PendingIntent to launch our activity if the user selects this
+		// notification
+		PendingIntent contentIntent = PendingIntent.getActivity(this, 0,
+				new Intent(this, GPSTracker.class), 0);
+
+		// Set the info for the views that show in the notification panel.
+		notification.setLatestEventInfo(this, getText(R.string.service_name),
+				text, contentIntent);
+
+		// Send the notification.
+		// We use a layout id because it is a unique number. We use it later to
+		// cancel.
+		mNM.notify(R.string.local_service_started, notification);
+	}
+
+	// This is the object that receives interactions from clients. See
+	// RemoteService for a more complete example.
+	private final IBinder mBinder = new LocalBinder();
+
+	@Override
+	public IBinder onBind(Intent intent) {
+		return mBinder;
+	}
+
+	public static void setMinTimeMillis(long _minTimeMillis) {
+		minTimeMillis = _minTimeMillis;
+	}
+
+	public static long getMinTimeMillis() {
+		return minTimeMillis;
+	}
+
+	public static void setMinDistanceMeters(long _minDistanceMeters) {
+		minDistanceMeters = _minDistanceMeters;
+	}
+
+	public static long getMinDistanceMeters() {
+		return minDistanceMeters;
+	}
+
+	public static float getMinAccuracyMeters() {
+		return minAccuracyMeters;
+	}
+
+	public static void setMinAccuracyMeters(float minAccuracyMeters) {
+		GPSTracker.minAccuracyMeters = minAccuracyMeters;
+	}
+
+	public static void setShowingDebugToast(boolean showingDebugToast) {
+		GPSTracker.showingDebugToast = showingDebugToast;
+	}
+
+	public static boolean isShowingDebugToast() {
+		return showingDebugToast;
 	}
 	
-	/**
-	 * Function to check GPS/wifi enabled
-	 * @return boolean
-	 * */
-	public boolean canGetLocation() {
-		return this.canGetLocation;
+	public static double getLatitude() {
+		return saveLat;
 	}
 	
+	public static double getLongitude() {
+		return saveLong;
+	}
+
 	/**
-	 * Function to show settings alert dialog
-	 * On pressing Settings button will lauch Settings Options
-	 * */
-	public void showSettingsAlert(){
-		AlertDialog.Builder alertDialog = new AlertDialog.Builder(mContext);
-   	 
-        // Setting Dialog Title
-        alertDialog.setTitle("GPS is settings");
- 
-        // Setting Dialog Message
-        alertDialog.setMessage("GPS is not enabled. Do you want to go to settings menu?");
- 
-        // On pressing Settings button
-        alertDialog.setPositiveButton("Settings", new DialogInterface.OnClickListener() {
-            public void onClick(DialogInterface dialog,int which) {
-            	Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
-            	mContext.startActivity(intent);
-            }
-        });
- 
-        // on pressing cancel button
-        alertDialog.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
-            public void onClick(DialogInterface dialog, int which) {
-            dialog.cancel();
-            }
-        });
- 
-        // Showing Alert Message
-        alertDialog.show();
+	 * Class for clients to access. Because we know this service always runs in
+	 * the same process as its clients, we don't need to deal with IPC.
+	 */
+	public class LocalBinder extends Binder {
+		GPSTracker getService() {
+			return GPSTracker.this;
+		}
 	}
-
-	@Override
-	public void onLocationChanged(Location location) {
-	}
-
-	@Override
-	public void onProviderDisabled(String provider) {
-	}
-
-	@Override
-	public void onProviderEnabled(String provider) {
-	}
-
-	@Override
-	public void onStatusChanged(String provider, int status, Bundle extras) {
-	}
-
-	@Override
-	public IBinder onBind(Intent arg0) {
-		return null;
-	}
-
 }

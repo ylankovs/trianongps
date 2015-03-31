@@ -48,7 +48,7 @@
     	android:layout_marginTop="24dp"
     	android:layout_centerVertical="true"
     	android:layout_centerHorizontal="true"
-    	android:text="Свернуть" />
+    	android:text="Список" />
 
     <Button
     	android:id="@+id/button1"
