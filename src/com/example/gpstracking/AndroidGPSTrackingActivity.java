@@ -3,16 +3,14 @@ package com.example.gpstracking;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLConnection;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -33,9 +31,6 @@ import android.net.NetworkInfo;
 import android.net.NetworkInfo.State;
 import android.os.Bundle;
 import android.util.Base64;
-import android.view.Gravity;
-import android.view.LayoutInflater;
-import android.view.Menu;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.ArrayAdapter;
@@ -46,7 +41,7 @@ import android.widget.Toast;
 
 import com.example.gpstracking.GPSTracker;
 
-@SuppressLint("SimpleDateFormat") public class AndroidGPSTrackingActivity extends Activity implements OnClickListener {
+@SuppressLint({ "SimpleDateFormat", "UseValueOf" }) public class AndroidGPSTrackingActivity extends Activity implements OnClickListener {
 
 	//The "x" and "y" position of the "Show Button" on screen.
 	Point p;
@@ -69,7 +64,7 @@ import com.example.gpstracking.GPSTracker;
 
 	private static int NUM_ADDRS_PARAMS = 4;
 	private static int NUM_MSG_PARAMS = 5;
-	private static double CLIENT_RANGE_KMS = 0.036; // 2 km
+	private static double CLIENT_RANGE_KMS = 0.136; // 2 km
 
 	private static String filenameMSG = "messages";
 	private static String filenameADRS = "addresses";
@@ -126,7 +121,7 @@ import com.example.gpstracking.GPSTracker;
 	/** Called when the activity is first created. */
 	@Override
 	public void onCreate(Bundle icicle) {
-		Toast.makeText(getApplicationContext(), "Opened activity", Toast.LENGTH_LONG).show();
+		//Toast.makeText(getApplicationContext(), "Opened activity", Toast.LENGTH_LONG).show();
 		super.onCreate(icicle);
 		setContentView(R.layout.gps);
 
@@ -201,7 +196,7 @@ import com.example.gpstracking.GPSTracker;
 					}
 				}
 				is.close();
-				Toast.makeText(getApplicationContext(), "Read from file filenameADRS: " + sb, Toast.LENGTH_LONG).show();
+				//Toast.makeText(getApplicationContext(), "Read from file filenameADRS: " + sb, Toast.LENGTH_LONG).show();
 			} catch(OutOfMemoryError om){
 				om.printStackTrace();
 				Toast.makeText(getApplicationContext(), "Out of memory to read file filenameADRS", Toast.LENGTH_LONG).show();
@@ -235,58 +230,37 @@ import com.example.gpstracking.GPSTracker;
 				}
 				spinnerAdapter1.notifyDataSetChanged();
 
-				Toast.makeText(getApplicationContext(), "Spinner updated " + cntUsed + "/" + nCnt, Toast.LENGTH_LONG).show();
+				//Toast.makeText(getApplicationContext(), "Spinner updated " + cntUsed + "/" + nCnt, Toast.LENGTH_LONG).show();
 			}
 			break;
 		case R.id.button2: // buttonLoad
 			try {
-				DefaultHttpClient httpclient = new DefaultHttpClient();
+				URLConnection connection = null;
 
-				HttpGet httppost = new HttpGet("http://91.217.202.15:8080/tracking/track_fetch_addrs.php?idAg=" + mess);
-				HttpResponse response = httpclient.execute(httppost);
-				HttpEntity ht = response.getEntity();
+				BufferedReader bufferReader = null;
+				
+				URL urlWeb = new URL("http://91.217.202.15:8080/tracking/track_fetch_addrs.php?idAg=" + mess);
 
-				BufferedHttpEntity buf = new BufferedHttpEntity(ht);
+				connection = urlWeb.openConnection();
+				connection.connect();
 
-				InputStream is = buf.getContent();
-
-
-				BufferedReader r = new BufferedReader(new InputStreamReader(is));
-
-				StringBuilder total = new StringBuilder();
-				String line;
-				while ((line = r.readLine()) != null) {
-					total.append(line + "\n");
+				bufferReader = new BufferedReader(new InputStreamReader(connection
+						.getInputStream(), "windows-1251"), 4096);
+				
+				String inputLine = "";
+				StringBuilder websiteContent = new StringBuilder();
+				while ((inputLine = bufferReader.readLine()) != null) {
+					websiteContent.append(inputLine);
+					websiteContent.append('\n');
 				}
-
-				/*
-				byte[] encoded = Base64.encode(total.toString().getBytes("CP1252"), Base64.DEFAULT);
-				String str = new String(encoded, "CP1252");
-				 */
-
-				/*
-				ArrayList<String> t = decodeString(total.toString());
-
-				StringBuffer result = new StringBuffer();
-				for (int i = 0; i < t.size(); i++) {
-					result.append( t.get(i) );
-				}
-				String mynewstring = result.toString();
-				 */
-
-				//				byte bytes[] = total.toString().getBytes("Cp1251"); 
-				//				String mynewstring = new String(bytes, "UTF-8"); 
-
-				String mynewstring = total.toString();
-
-				Toast.makeText(getApplicationContext(), "Read from server:\n" + mynewstring, Toast.LENGTH_LONG).show();
-
-				//				Toast.makeText(getApplicationContext(), "Trying file writes", Toast.LENGTH_LONG).show();
+				
+				//Toast.makeText(getApplicationContext(), "Read from server:\n" + inputLine, Toast.LENGTH_LONG).show();
+				
 				FileOutputStream outputStream;
 
 				try {
 					outputStream = openFileOutput(filenameADRS, Context.MODE_PRIVATE);
-					outputStream.write(mynewstring.getBytes());
+					outputStream.write(websiteContent.toString().getBytes());
 					outputStream.close();
 					//					Toast.makeText(getApplicationContext(), "Wrote to file", Toast.LENGTH_LONG).show();
 				} catch (Exception e) {
@@ -317,7 +291,7 @@ import com.example.gpstracking.GPSTracker;
 			String clntId = getClientId(clientSelect);
 			String typ = getTyp(typSelect);
 
-			sendingParams += time + "^" + "0" + "^" + clientSelect + "^" + typSelect + "^" + textInput + "^";
+			sendingParams += time + "^" + "0" + "^" + clntId + "^" + typ + "^" + textInput + "^";
 
 			try{
 				InputStream is = openFileInput(filenameMSG);
@@ -367,12 +341,12 @@ import com.example.gpstracking.GPSTracker;
 						String temp = "";
 						temp += split[j] + "^" + split[j+1] + "^" + split[j+2] + "^" + split[j+3] + "^" + split[j+4] + "^";
 
-						Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track_msg_sav.php?sData"
-								+ temp, Toast.LENGTH_LONG).show();
+						//Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track_msg_sav.php?sData"
+						//		+ temp, Toast.LENGTH_LONG).show();
 
 						url = new URL("http://91.217.202.15:8080/tracking/track_msg_sav.php?sData=" + temp);
 						urlConnection = (HttpURLConnection) url.openConnection();
-						Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
+						//Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
 						InputStream in = new BufferedInputStream(urlConnection.getInputStream());
 						//readStream(in);
 						urlConnection.disconnect();

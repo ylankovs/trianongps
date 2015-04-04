@@ -10,23 +10,19 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.text.DateFormat;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import java.util.Date;
-import java.util.GregorianCalendar;
-import java.util.TimeZone;
 
 import com.example.gpstracking.R;
 import android.annotation.SuppressLint;
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -36,8 +32,8 @@ import android.net.NetworkInfo;
 import android.net.NetworkInfo.State;
 import android.os.Binder;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.util.Log;
 import android.widget.Toast;
 import com.example.gpstracking.MainActivity;
@@ -49,15 +45,13 @@ import com.example.gpstracking.MainActivity;
 	public static final String TRIPS_TABLE_NAME = "TRIPS";
 
 	private final DecimalFormat sevenSigDigits = new DecimalFormat("0.#######");
-	private final DateFormat timestampFormat = new SimpleDateFormat("yyyyMMddHHmmss");
 
 	private LocationManager lm;
 	private LocationListener locationListener;
-	private SQLiteDatabase db;
 
-	private static long minTimeMillis = 2000;
-	private static long minDistanceMeters = 10;
-	private static float minAccuracyMeters = 350;
+	private static long minTimeMillis = 20000;
+	private static long minDistanceMeters = 30;
+	private static float minAccuracyMeters = 50;
 
 	private int lastStatus = 0;
 	private static boolean showingDebugToast = true;
@@ -83,8 +77,6 @@ import com.example.gpstracking.MainActivity;
 
 	/** Called when the activity is first created. */
 	private void startLoggerService() {
-		Context context = getApplicationContext();
-
 		// ---use the LocationManager class to obtain GPS locations---
 		lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
@@ -93,8 +85,8 @@ import com.example.gpstracking.MainActivity;
 		gps_enabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
 		network_enabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
 
-		Toast.makeText(getApplicationContext(), "Enabled gps:" + gps_enabled + " net:" + network_enabled, 
-				Toast.LENGTH_LONG).show();
+		//Toast.makeText(getApplicationContext(), "Enabled gps:" + gps_enabled + " net:" + network_enabled, 
+		//		Toast.LENGTH_LONG).show();
 
 		if (gps_enabled)
 			lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,
@@ -197,13 +189,13 @@ import com.example.gpstracking.MainActivity;
 											nCnt ++;
 										}
 
-										Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track.php?"
-												+ sendingParams, Toast.LENGTH_LONG).show();
+										//Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track.php?"
+										//		+ sendingParams, Toast.LENGTH_LONG).show();
 
 										sendingParams.substring(0, (sendingParams.length() - 1)); // cut off the first ^ symbol
 										url = new URL("http://91.217.202.15:8080/tracking/track.php?" + sendingParams);
 										urlConnection = (HttpURLConnection) url.openConnection();
-										Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
+										//Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
 										InputStream in = new BufferedInputStream(urlConnection.getInputStream());
 										//readStream(in);
 										urlConnection.disconnect();
@@ -243,7 +235,7 @@ import com.example.gpstracking.MainActivity;
 									outputStream = openFileOutput(filenameGPS, Context.MODE_APPEND);
 									outputStream.write(("^" + params).getBytes());
 									outputStream.close();
-									Toast.makeText(getApplicationContext(), "Wrote to file filenameGPS", Toast.LENGTH_LONG).show();
+									//Toast.makeText(getApplicationContext(), "Wrote to file filenameGPS", Toast.LENGTH_LONG).show();
 								} catch (Exception e) {
 									e.printStackTrace();
 									Toast.makeText(getApplicationContext(), "Error to write to file " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -257,7 +249,7 @@ import com.example.gpstracking.MainActivity;
 				} catch (Exception e) {
 					Log.e(tag, e.toString());
 				}
-				if (pointIsRecorded) {
+				if (false) {
 					if (showingDebugToast) Toast.makeText(
 							getBaseContext(),
 							"Location stored: \nLat: " + sevenSigDigits.format(loc.getLatitude())
@@ -265,7 +257,7 @@ import com.example.gpstracking.MainActivity;
 							+ " \nAlt: " + (loc.hasAltitude() ? loc.getAltitude()+"m":"?")
 							+ " \nAcc: " + (loc.hasAccuracy() ? loc.getAccuracy()+"m":"?"),
 							Toast.LENGTH_SHORT).show();
-				} else {
+				} else if (false){
 					if (showingDebugToast) Toast.makeText(
 							getBaseContext(),
 							"Location not accurate enough: \nLat: " + sevenSigDigits.format(loc.getLatitude())
@@ -423,5 +415,25 @@ import com.example.gpstracking.MainActivity;
 		GPSTracker getService() {
 			return GPSTracker.this;
 		}
+	}
+	
+	@SuppressLint("NewApi")
+	@Override
+	public void onTaskRemoved(Intent rootIntent)
+	{
+		//Toast.makeText(getApplicationContext(), "Detected service kill, restarting service!", Toast.LENGTH_LONG).show();
+		Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
+	    restartServiceIntent.setPackage(getPackageName());
+
+	    PendingIntent restartServicePendingIntent = PendingIntent.getService(getApplicationContext(), 1, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT);
+	    AlarmManager alarmService = (AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
+	    alarmService.set(
+	            AlarmManager.ELAPSED_REALTIME,
+	            SystemClock.elapsedRealtime() + 1000,
+	            restartServicePendingIntent);
+	    
+	    //Toast.makeText(getApplicationContext(), "Set service restart!", Toast.LENGTH_LONG).show();
+
+	    super.onTaskRemoved(rootIntent);
 	}
 }
