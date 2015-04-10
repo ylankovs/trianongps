@@ -182,8 +182,11 @@ import com.example.gpstracking.MainActivity;
 									for (int i=0; i<nTx; i++)
 									{
 										String sendingParams = "idAg=" + MainActivity.getEmpId() + "&sData=";
-										for(int j=0; j<((nSets - nCnt) > NUM_ALLOWED_SETS_PER_TX ? NUM_ALLOWED_SETS_PER_TX*NUM_COORD_PARAMS
-												: (nSets - nCnt) * NUM_COORD_PARAMS); j+=NUM_COORD_PARAMS)
+
+										int t = nCnt;
+										for(int j=t; j<((nSets - t) >= NUM_ALLOWED_SETS_PER_TX ? 
+												NUM_ALLOWED_SETS_PER_TX*NUM_COORD_PARAMS :
+												(nSets - t) * NUM_COORD_PARAMS); j+=NUM_COORD_PARAMS)
 										{
 											sendingParams += split[j] + "^" + split[j+1] + "^" + split[j+2] + "^";
 											nCnt ++;
@@ -192,7 +195,7 @@ import com.example.gpstracking.MainActivity;
 										//Toast.makeText(getApplicationContext(), "Sending request: http://91.217.202.15:8080/tracking/track.php?"
 										//		+ sendingParams, Toast.LENGTH_LONG).show();
 
-										sendingParams.substring(0, (sendingParams.length() - 1)); // cut off the first ^ symbol
+										sendingParams.substring(0, (sendingParams.length() - 1)); // cut off the last ^ symbol
 										url = new URL("http://91.217.202.15:8080/tracking/track.php?" + sendingParams);
 										urlConnection = (HttpURLConnection) url.openConnection();
 										//Toast.makeText(getApplicationContext(), "Server message: " + urlConnection.getResponseMessage(), Toast.LENGTH_LONG).show();
